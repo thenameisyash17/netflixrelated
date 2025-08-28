@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlixNet - Fast Video Streaming (IndexedDB)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0f0f0f;--panel:#171717;--muted:#a3a3a3;--accent:#e50914;--accent-2:#4d79ff;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:#fff;font-family:Inter,system-ui,Arial,sans-serif}
+    header{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,rgba(0,0,0,.8),rgba(0,0,0,.2));backdrop-filter:blur(6px);display:flex;gap:12px;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #1f1f1f}
+    .logo{font-weight:800;letter-spacing:.5px;color:var(--accent);text-decoration:none;font-size:20px}
+    .actions{display:flex;gap:8px;align-items:center}
+    .btn{border:none;background:#2a2a2a;color:#fff;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer;transition:transform .03s ease,opacity .2s}
+    .btn:hover{opacity:.9}
+    .btn:active{transform:scale(.98)}
+    .btn-accent{background:var(--accent)}
+    .btn-blue{background:var(--accent-2)}
+    .pill{background:#1f1f1f;border:1px solid #2a2a2a;border-radius:12px;padding:8px 12px;color:#fff}
+    .pill input{all:unset;width:240px}
+
+    .wrap{max-width:1200px;margin:0 auto;padding:16px}
+    .hero{padding:24px 16px}
+    .muted{color:var(--muted)}
+
+    /* Grid */
+    .grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px}
+    @media (max-width:1200px){.grid{grid-template-columns:repeat(5,1fr)}}
+    @media (max-width:992px){.grid{grid-template-columns:repeat(4,1fr)}}
+    @media (max-width:768px){.grid{grid-template-columns:repeat(3,1fr)}}
+    @media (max-width:560px){.grid{grid-template-columns:repeat(2,1fr)}}
+
+    .card{background:var(--panel);border:1px solid #232323;border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+    .thumb{aspect-ratio:16/9;background:#111 url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"160\" height=\"90\"><rect width=\"100%\" height=\"100%\" fill=\"%23111111\"/><text x=\"50%\" y=\"50%\" dominant-baseline=\"middle\" text-anchor=\"middle\" fill=\"%233a3a3a\" font-family=\"Arial\" font-size=\"14\">No thumbnail</text></svg>') center/cover no-repeat}
+    .meta{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+    .title{font-weight:700;font-size:14px;line-height:1.2}
+    .sub{font-size:12px;color:var(--muted)}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+    .center{display:flex;align-items:center;justify-content:center}
+
+    /* Modals */
+    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.7);z-index:60}
+    .sheet{width:min(520px,92vw);background:#111;border:1px solid #242424;border-radius:16px;padding:16px}
+    .sheet h3{margin:0 0 10px;font-size:18px}
+    .field{display:flex;flex-direction:column;gap:6px;margin:10px 0}
+    .field input,.field select{background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:10px;border-radius:10px}
+
+    .video-modal{position:fixed;inset:0;display:none;background:rgba(0,0,0,.92);z-index:70}
+    .video-wrap{width:min(1100px,96vw);margin:40px auto}
+    video{width:100%;background:#000;border-radius:12px}
+
+    .toolbar{display:flex;gap:8px;align-items:center}
+
+    .toast{position:fixed;bottom:16px;right:16px;background:#111;border:1px solid #2a2a2a;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(8px);transition:all .25s ease;z-index:80}
+    .toast.show{opacity:1;transform:none}
+
+    .divider{height:1px;background:#222;margin:10px 0}
+
+    .ghost{opacity:.6}
+  </style>
+</head>
+<body>
+  <header>
+    <a class="logo" href="#">FLIXNET</a>
+    <div class="actions">
+      <label class="pill" title="Search by title or category">
+        <i class="fa fa-search" style="margin-right:6px"></i>
+        <input id="searchInput" placeholder="Search videos..." />
+      </label>
+      <button id="uploadBtn" class="btn btn-accent" style="display:none">Upload</button>
+      <button id="loginBtn" class="btn btn-blue">Login</button>
+      <button id="logoutBtn" class="btn" style="display:none">Logout</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <h2 style="margin:0 0 6px">Your Library</h2>
+      <div class="muted">Fast, scalable, offline‑friendly. Powered by IndexedDB with thumbnails + lazy loading.</div>
+    </section>
+
+    <section id="results">
+      <div id="videoGrid" class="grid"></div>
+      <div id="loadMoreWrap" class="center" style="padding:14px">
+        <button id="loadMore" class="btn" style="display:none">Load more</button>
+        <div id="emptyState" class="muted" style="display:none">No videos match your search.</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Upload Modal -->
+  <div id="uploadModal" class="modal">
+    <div class="sheet">
+      <h3>Upload video</h3>
+      <div class="divider"></div>
+      <form id="uploadForm">
+        <div class="field">
+          <label>Title</label>
+          <input id="videoTitle" required placeholder="My clip" />
+        </div>
+        <div class="field">
+          <label>Description</label>
+          <input id="videoDesc" placeholder="Optional" />
+        </div>
+        <div class="field">
+          <label>Category</label>
+          <input id="videoCat" placeholder="eg. Travel, Coding" />
+        </div>
+        <div class="field">
+          <label>Video file</label>
+          <input id="videoFile" type="file" accept="video/*" required />
+        </div>
+        <div class="toolbar" style="justify-content:space-between; margin-top:6px">
+          <div class="muted" id="uploadHint">Thumbnails are generated locally for fast lists.</div>
+          <div>
+            <button type="button" class="btn" id="closeUpload">Cancel</button>
+            <button type="submit" class="btn btn-accent">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Auth Modal -->
+  <div id="authModal" class="modal">
+    <div class="sheet">
+      <h3 id="authTitle">Login</h3>
+      <div class="divider"></div>
+      <form id="authForm">
+        <div class="field">
+          <label>Email</label>
+          <input id="authEmail" type="email" required />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input id="authPass" type="password" required />
+        </div>
+        <div class="toolbar" style="justify-content:space-between">
+          <button type="button" id="toggleMode" class="btn">Switch to Register</button>
+          <div>
+            <button type="button" class="btn" id="closeAuth">Cancel</button>
+            <button type="submit" class="btn btn-blue" id="authSubmit">Login</button>
+          </div>
+        </div>
+        <div class="muted" style="margin-top:8px">Admin (demo): <span class="ghost">admin@flixnet.com / admin123</span></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Player Modal -->
+  <div id="playerModal" class="video-modal center">
+    <div class="video-wrap">
+      <video id="player" controls></video>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+  // ======= IndexedDB Setup =======
+  const DB_NAME = 'flixnet_db_v2';
+  const DB_VERSION = 2;
+  const VIDEO_STORE = 'videos';
+  const USER_STORE = 'users';
+
+  let db; // IDBDatabase
+
+  function openDB(){
+    return new Promise((resolve,reject)=>{
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = (e)=>{
+        const db = e.target.result;
+        if(!db.objectStoreNames.contains(VIDEO_STORE)){
+          const vs = db.createObjectStore(VIDEO_STORE, { keyPath:'id' });
+          vs.createIndex('title_lc','title_lc',{ unique:false });
+          vs.createIndex('category_lc','category_lc',{ unique:false });
+          vs.createIndex('uploader','uploader',{ unique:false });
+          vs.createIndex('createdAt','createdAt',{ unique:false });
+        } else {
+          const vs = req.transaction.objectStore(VIDEO_STORE);
+          if(!vs.indexNames.contains('title_lc')) vs.createIndex('title_lc','title_lc',{unique:false});
+          if(!vs.indexNames.contains('category_lc')) vs.createIndex('category_lc','category_lc',{unique:false});
+          if(!vs.indexNames.contains('uploader')) vs.createIndex('uploader','uploader',{unique:false});
+          if(!vs.indexNames.contains('createdAt')) vs.createIndex('createdAt','createdAt',{unique:false});
+        }
+        if(!db.objectStoreNames.contains(USER_STORE)){
+          db.createObjectStore(USER_STORE, { keyPath:'email' });
+        }
+      };
+      req.onsuccess = ()=>{ db = req.result; resolve(db); };
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+
+  function tx(storeNames, mode='readonly'){
+    return db.transaction(storeNames, mode);
+  }
+
+  // ======= Utils =======
+  const $ = (sel)=>document.querySelector(sel);
+  const grid = $('#videoGrid');
+  const toastEl = $('#toast');
+
+  function toast(msg){
+    toastEl.textContent = msg; toastEl.classList.add('show');
+    setTimeout(()=>toastEl.classList.remove('show'), 1600);
+  }
+
+  function formatBytes(bytes){
+    if(bytes < 1024) return bytes + ' B';
+    let kb = bytes/1024; if(kb < 1024) return kb.toFixed(2)+' KB';
+    let mb = kb/1024; if(mb < 1024) return mb.toFixed(2)+' MB';
+    let gb = mb/1024; return gb.toFixed(2)+' GB';
+  }
+
+  // Create a thumbnail (dataURL) from a video Blob
+  async function createThumbnail(file){
+    return new Promise((resolve)=>{
+      const url = URL.createObjectURL(file);
+      const v = document.createElement('video');
+      v.preload = 'metadata';
+      v.src = url;
+      v.crossOrigin = 'anonymous';
+      v.muted = true; // no autoplay restrictions
+      v.addEventListener('loadeddata', ()=>{
+        // Seek to 0.5s to avoid blank frame
+        const capture = ()=>{
+          try{
+            const canvas = document.createElement('canvas');
+            const w = 640, h = Math.round(w * (v.videoHeight/v.videoWidth || 9/16));
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(v, 0, 0, w, h);
+            const dataURL = canvas.toDataURL('image/jpeg', .7);
+            URL.revokeObjectURL(url);
+            resolve({ dataURL, w, h });
+          } catch(err){
+            URL.revokeObjectURL(url);
+            resolve({ dataURL: null, w:0, h:0 });
+          }
+        };
+        if (v.readyState >= 2){
+          v.currentTime = Math.min(.5, v.duration || .5);
+          v.addEventListener('seeked', capture, { once:true });
+          // Fallback if seek fails
+          setTimeout(capture, 500);
+        } else {
+          capture();
+        }
+      }, { once:true });
+    });
+  }
+
+  // ======= Auth (hashed passwords) =======
+  let currentUser = null; // {email, role}
+
+  async function sha256(text){
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(text));
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+
+  async function saveUser(user){
+    const t = tx([USER_STORE],'readwrite');
+    await new Promise((res,rej)=>{ const r=t.objectStore(USER_STORE).put(user); r.onsuccess=res; r.onerror=()=>rej(r.error); });
+    await new Promise((res)=>{ t.oncomplete=res; });
+  }
+
+  async function getUser(email){
+    const t = tx([USER_STORE]);
+    return new Promise((res,rej)=>{ const r=t.objectStore(USER_STORE).get(email); r.onsuccess=()=>res(r.result||null); r.onerror=()=>rej(r.error); });
+  }
+
+  async function ensureAdminDemo(){
+    const existing = await getUser('admin@flixnet.com');
+    if(!existing){
+      await saveUser({ email:'admin@flixnet.com', pass: await sha256('admin123'), role:'admin', createdAt:Date.now() });
+    }
+  }
+
+  // ======= Video CRUD =======
+  async function addVideo(record){
+    const t = tx([VIDEO_STORE],'readwrite');
+    await new Promise((res,rej)=>{ const r=t.objectStore(VIDEO_STORE).put(record); r.onsuccess=res; r.onerror=()=>rej(r.error); });
+    await new Promise((res)=>{ t.oncomplete=res; });
+  }
+
+  async function getVideoById(id){
+    const t = tx([VIDEO_STORE]);
+    return new Promise((res,rej)=>{ const r=t.objectStore(VIDEO_STORE).get(id); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+  }
+
+  async function deleteVideo(id){
+    const t = tx([VIDEO_STORE],'readwrite');
+    await new Promise((res,rej)=>{ const r=t.objectStore(VIDEO_STORE).delete(id); r.onsuccess=res; r.onerror=()=>rej(r.error); });
+    await new Promise((res)=>{ t.oncomplete=res; });
+  }
+
+  // ======= Efficient Listing (cursor + pagination) =======
+  const PAGE_SIZE = 12;
+  let pageOffset = 0;
+  let lastQuery = '';
+
+  async function listVideosPage({ append=false }={}){
+    const q = $('#searchInput').value.trim().toLowerCase();
+    const firstPage = !append || q !== lastQuery;
+    if(firstPage){ pageOffset = 0; grid.innerHTML = ''; $('#emptyState').style.display='none'; }
+    lastQuery = q;
+
+    const t = tx([VIDEO_STORE]);
+    const store = t.objectStore(VIDEO_STORE);
+    const idx = store.index('createdAt');
+
+    let count=0, skipped=0, added=0;
+
+    return new Promise((resolve)=>{
+      // newest first => use cursor direction 'prev' on createdAt index
+      idx.openCursor(null,'prev').onsuccess = (ev)=>{
+        const cursor = ev.target.result;
+        if(!cursor){
+          // no more
+          $('#loadMore').style.display = added===PAGE_SIZE ? 'block' : 'none';
+          if(!grid.children.length){ $('#emptyState').style.display='block'; }
+          return resolve();
+        }
+        const v = cursor.value;
+        const hay = (v.title_lc||'')+'\n'+(v.category_lc||'');
+        const ok = !q || hay.includes(q);
+        if(ok){
+          if(skipped < pageOffset){ skipped++; return cursor.continue(); }
+          if(count < PAGE_SIZE){
+            renderCard(v);
+            count++; added++;
+            return cursor.continue();
+          }
+          // page filled
+          $('#loadMore').style.display='block';
+          return resolve();
+        }
+        cursor.continue();
+      };
+    }).then(()=>{});
+  }
+
+  // In‑memory objectURL cache to avoid recreating URLs repeatedly
+  const urlCache = new Map(); // id -> objectURL
+
+  function renderCard(v){
+    const card = document.createElement('div');
+    card.className = 'card';
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    if(v.thumb){ thumb.style.backgroundImage = `url(${v.thumb})`; thumb.style.backgroundSize='cover'; }
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = v.title;
+
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = `${formatBytes(v.size)} • ${v.category||'Uncategorized'}`;
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    const play = document.createElement('button'); play.className='btn btn-accent'; play.textContent='Play';
+    play.onclick = async ()=>{
+      const rec = await getVideoById(v.id);
+      if(!rec || !rec.blob){ return toast('Video data missing'); }
+      let url = urlCache.get(v.id);
+      if(!url){ url = URL.createObjectURL(new Blob([rec.blob],{ type: rec.type||'video/mp4' })); urlCache.set(v.id,url); }
+      const player = $('#player'); player.src = url; $('#playerModal').style.display='flex';
+    };
+
+    const canDelete = currentUser && (currentUser.role==='admin' || currentUser.email===v.uploader);
+    if(canDelete){
+      const del = document.createElement('button'); del.className='btn'; del.textContent='Delete';
+      del.onclick = async ()=>{
+        await deleteVideo(v.id);
+        // cleanup cache url
+        const u = urlCache.get(v.id); if(u){ URL.revokeObjectURL(u); urlCache.delete(v.id); }
+        // remove and refresh pagination state
+        card.remove();
+        toast('Deleted');
+      };
+      row.appendChild(del);
+    }
+
+    row.insertBefore(play,row.firstChild);
+
+    meta.appendChild(title); meta.appendChild(sub); meta.appendChild(row);
+    card.appendChild(thumb); card.appendChild(meta);
+    grid.appendChild(card);
+  }
+
+  // ======= Event wiring =======
+  $('#loadMore').addEventListener('click', async ()=>{ pageOffset += PAGE_SIZE; await listVideosPage({ append:true }); });
+
+  // Debounced search
+  let srchTimer; $('#searchInput').addEventListener('input', ()=>{ clearTimeout(srchTimer); srchTimer=setTimeout(()=>listVideosPage({append:false}), 200); });
+
+  // Player close
+  $('#playerModal').addEventListener('click',(e)=>{ if(e.target.id==='playerModal'){ $('#playerModal').style.display='none'; $('#player').pause(); } });
+
+  // Upload modal controls
+  $('#uploadBtn').addEventListener('click', ()=>$('#uploadModal').style.display='flex');
+  $('#closeUpload').addEventListener('click', ()=>$('#uploadModal').style.display='none');
+
+  // Auth modal controls
+  $('#loginBtn').addEventListener('click', ()=>$('#authModal').style.display='flex');
+  $('#closeAuth').addEventListener('click', ()=>$('#authModal').style.display='none');
+
+  // Toggle Login/Register
+  let isRegister = false;
+  $('#toggleMode').addEventListener('click', ()=>{
+    isRegister = !isRegister;
+    $('#authTitle').textContent = isRegister ? 'Register' : 'Login';
+    $('#authSubmit').textContent = isRegister ? 'Create account' : 'Login';
+    $('#toggleMode').textContent = isRegister ? 'Switch to Login' : 'Switch to Register';
+  });
+
+  // Auth submit
+  $('#authForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const email = $('#authEmail').value.trim().toLowerCase();
+    const pass = $('#authPass').value;
+    if(!email || !pass) return;
+    const hashed = await sha256(pass);
+    if(isRegister){
+      const existing = await getUser(email);
+      if(existing){ return toast('User already exists'); }
+      await saveUser({ email, pass:hashed, role:'user', createdAt:Date.now() });
+      toast('Account created. You can login now.');
+      isRegister=false; $('#authTitle').textContent='Login'; $('#authSubmit').textContent='Login'; $('#toggleMode').textContent='Switch to Register';
+    } else {
+      const user = await getUser(email);
+      if(!user || user.pass!==hashed){ return toast('Invalid credentials'); }
+      currentUser = { email:user.email, role:user.role };
+      $('#authModal').style.display='none';
+      $('#loginBtn').style.display='none';
+      $('#logoutBtn').style.display='inline-block';
+      $('#uploadBtn').style.display='inline-block';
+      toast('Welcome ' + currentUser.email);
+      await listVideosPage({append:false});
+    }
+  });
+
+  // Logout
+  $('#logoutBtn').addEventListener('click', ()=>{
+    currentUser=null; $('#loginBtn').style.display='inline-block'; $('#logoutBtn').style.display='none'; $('#uploadBtn').style.display='none'; toast('Logged out');
+    listVideosPage({append:false});
+  });
+
+  // Upload flow
+  $('#uploadForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const file = $('#videoFile').files[0];
+    if(!file){ return toast('Pick a file'); }
+
+    // Generate thumbnail (fast & tiny)
+    const thumbObj = await createThumbnail(file);
+
+    // Read as ArrayBuffer for IndexedDB
+    const buffer = await file.arrayBuffer();
+
+    const rec = {
+      id: String(Date.now()),
+      title: $('#videoTitle').value.trim() || file.name,
+      title_lc: ($('#videoTitle').value.trim() || file.name).toLowerCase(),
+      description: $('#videoDesc').value.trim(),
+      category: $('#videoCat').value.trim(),
+      category_lc: $('#videoCat').value.trim().toLowerCase(),
+      uploader: currentUser? currentUser.email : 'guest',
+      size: file.size,
+      type: file.type || 'video/mp4',
+      thumb: thumbObj.dataURL, // DataURL for fast listing
+      blob: buffer,            // Actual video data
+      createdAt: Date.now()
+    };
+
+    await addVideo(rec);
+    $('#uploadModal').style.display='none';
+    // Reset form
+    e.target.reset();
+    toast('Uploaded');
+    await listVideosPage({append:false});
+  });
+
+  // ======= Boot =======
+  (async function(){
+    await openDB();
+    await ensureAdminDemo();
+    await listVideosPage({append:false});
+  })();
+  </script>
+
+  <!-- Icons -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" defer></script>
+</body>
+</html>
